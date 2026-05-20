@@ -1,6 +1,8 @@
 # QuietCV
 
 QuietCV 是一个安静、克制、面向 AI 时代的 Markdown 简历工作台。左侧编写结构化 Markdown，右侧预览面向招聘者的 A4 简历，并支持打印或导出 PDF。
+<img width="3824" height="2008" alt="image" src="https://github.com/user-attachments/assets/ec3884b5-5ff4-4619-877b-da1ce0733cee" />
+
 
 ## 产品定位
 
