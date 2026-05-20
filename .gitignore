@@ -1,0 +1,13 @@
+# environment
+.env*.local
+
+# dependencies
+node_modules/
+
+# build output
+.next/
+.vercel/
+
+# local system files
+.DS_Store
+tsconfig.tsbuildinfo
