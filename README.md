@@ -22,14 +22,6 @@ QuietCV 不是传统的在线简历编辑器，而是一个长期自用的职业
 - 导出：右侧工具栏支持打印和导出 PDF。
 - 保存：简历内容保存在浏览器 `localStorage`。
 
-## 默认简历模板
-
-默认 Markdown 模板只有一个可信来源：
-
-- `data/default-resume.ts`
-
-该文件导出 `DEFAULT_RESUME_MARKDOWN`，在没有本地保存内容时由 `app/page.tsx` 加载。项目不再保留单独的 `.md` 模板副本，避免两份模板内容漂移。
-
 ## 本地开发
 
 ```bash
