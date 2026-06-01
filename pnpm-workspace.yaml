@@ -1,4 +1,4 @@
 allowBuilds:
   sharp: true
-onlyBuiltDependencies:
-  - sharp
+overrides:
+  dompurify: ^3.4.7
