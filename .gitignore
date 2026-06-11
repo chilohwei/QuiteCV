@@ -6,7 +6,11 @@ node_modules/
 
 # build output
 .next/
+.open-next/
+.wrangler/
 .vercel/
+cloudflare-env.d.ts
+.dev.vars
 
 # local system files
 .DS_Store

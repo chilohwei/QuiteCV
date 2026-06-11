@@ -1,4 +1,12 @@
 allowBuilds:
+  esbuild: true
   sharp: true
+  workerd: true
+
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - workerd
+
 overrides:
   dompurify: ^3.4.7
