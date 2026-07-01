@@ -10,17 +10,18 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
+        url: '/icon.png',
+        type: 'image/png',
+        sizes: '512x512',
       },
     ],
-    shortcut: '/icon.svg',
-    apple: '/icon.svg',
+    shortcut: '/icon.png',
+    apple: '/icon.png',
   },
   openGraph: {
     title: 'QuietCV',
     description: 'A quiet, AI-native Markdown resume workbench.',
-    images: [{ url: '/logo.svg', width: 156, height: 40, alt: 'QuietCV' }],
+    images: [{ url: '/logo.png', width: 1200, height: 428, alt: 'QuietCV' }],
   },
 }
 

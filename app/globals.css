@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import './fonts.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -75,8 +76,8 @@
 }
 
 @theme inline {
-  --font-sans: 'Geist', 'Geist Fallback';
-  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --font-sans: 'Noto Sans SC', sans-serif;
+  --font-mono: 'Noto Sans Mono', 'Noto Sans SC', monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -173,6 +174,44 @@
 .recruiter-resume {
   flex: 0 0 auto;
   scroll-snap-align: center;
+}
+
+.format-range {
+  height: 14px;
+  appearance: none;
+  background: transparent;
+}
+
+.format-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 9999px;
+  background: #d4d4d4;
+}
+
+.format-range::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -5.5px;
+  appearance: none;
+  border: 2px solid #fff;
+  border-radius: 9999px;
+  background: #171717;
+  box-shadow: 0 1px 2px rgba(16, 16, 16, 0.12);
+}
+
+.format-range::-moz-range-track {
+  height: 3px;
+  border-radius: 9999px;
+  background: #d4d4d4;
+}
+
+.format-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 9999px;
+  background: #171717;
+  box-shadow: 0 1px 2px rgba(16, 16, 16, 0.12);
 }
 
 @media print {

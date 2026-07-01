@@ -1,10 +1,18 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { ImagePlus } from "lucide-react";
+import { useMemo, useRef } from "react";
 
 const MonacoEditor = dynamic(
-  () => import("@monaco-editor/react").then((mod) => mod.default),
+  () =>
+    import("@monaco-editor/react").then((mod) => {
+      // Load Monaco from our own origin (public/monaco/vs) instead of the default
+      // jsdelivr CDN, which is unreliable / blocked on some networks and otherwise
+      // leaves the editor stuck on "Loading...".
+      mod.loader.config({ paths: { vs: "/monaco/vs" } });
+      return mod.default;
+    }),
   {
     ssr: false,
     loading: () => (
@@ -15,24 +23,31 @@ const MonacoEditor = dynamic(
   }
 );
 
+const EDITOR_FONT_FAMILY =
+  "'Noto Sans Mono', 'Noto Sans SC', monospace";
+
 interface MarkdownEditorProps {
   value: string;
   onChange: (value: string) => void;
   theme?: "light" | "dark";
+  photoDataUrl?: string;
+  onPhotoUpload?: (file: File) => void | Promise<void>;
 }
 
 export function MarkdownEditor({
   value,
   onChange,
   theme = "dark",
+  photoDataUrl,
+  onPhotoUpload,
 }: MarkdownEditorProps) {
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const editorOptions = useMemo(
     () => ({
       minimap: { enabled: false },
       fontSize: 13.5,
       lineHeight: 22,
-      fontFamily:
-        "'Geist Mono','JetBrains Mono','SF Mono',ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace",
+      fontFamily: EDITOR_FONT_FAMILY,
       fontLigatures: true,
       wordWrap: "on" as const,
       padding: { top: 18, bottom: 18 },
@@ -74,7 +89,33 @@ export function MarkdownEditor({
   );
 
   return (
-    <div className="w-full h-full">
+    <div className="relative w-full h-full">
+      {onPhotoUpload && (
+        <>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) {
+                void onPhotoUpload(file);
+              }
+              event.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => photoInputRef.current?.click()}
+            className="absolute right-4 top-3 z-10 grid size-8 cursor-pointer place-items-center rounded-lg border border-neutral-700/80 bg-[#171a20]/92 text-neutral-300 shadow-[0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-[#20242d] hover:text-white active:bg-[#2a303c]"
+            aria-label={photoDataUrl ? "更换照片" : "上传照片"}
+            title={photoDataUrl ? "更换照片" : "上传照片"}
+          >
+            <ImagePlus className="size-4" />
+          </button>
+        </>
+      )}
       <MonacoEditor
         height="100%"
         language="markdown"

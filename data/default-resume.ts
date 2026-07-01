@@ -1,4 +1,4 @@
-export const DEFAULT_RESUME_MARKDOWN = `---
+export const DEFAULT_RESUME_MARKDOWN_ZH = `---
 name: 你的姓名
 title: AI Agent 产品经理
 location: 城市
@@ -83,3 +83,108 @@ AI Agent 产品经理，关注 RAG、工作流与可评估的 Agent 体验。擅
 - 语言：中文（母语），英文（读写）
 - 主页：你的链接
 `;
+
+export const DEFAULT_RESUME_MARKDOWN_EN = `---
+name: Your Name
+title: AI Product Manager
+location: City
+email: your.name@example.com
+phone: +1 000 000 0000
+photo: /photo.jpg
+language: en-US
+tags:
+  - Available to start
+  - AI Agent / RAG / Workflow
+---
+
+## Summary
+
+AI Product Manager focused on RAG, workflow automation, and measurable agent experiences. Skilled at translating complex technical capabilities into shippable product plans and driving iteration through metrics, evaluation sets, and launch validation.
+
+## Highlights
+
+- Built an agent evaluation and regression process that turned subjective review into measurable release checks
+- Designed RAG retrieval and conversation strategies to improve reliability, controllability, and cost efficiency
+- Delivered AI workflow capabilities from zero to one and helped teams apply them in real business scenarios
+- Created shared language across product, research, engineering, and operations for complex AI initiatives
+
+## Skills
+
+- **Product:** Requirements analysis, information architecture, interaction design, data analysis, roadmap planning, acceptance criteria
+- **AI:** Prompt and context design, RAG, tool calling, agent evaluation, workflow orchestration, generation quality control
+- **Tools:** Figma, SQL and analytics tools, API debugging, Markdown docs, AI coding tools
+
+## Experience
+
+### AI SaaS Company
+**Senior Product Manager | Product Team**
+*Jan 2023 - May 2025 | City*
+
+Owned AI agent capabilities and implementation plans across discovery, workflow design, launch validation, and continuous improvement.
+
+- **Agent evaluation:** Defined evaluation dimensions and regression sets to support faster, safer release cycles
+- **RAG implementation:** Improved chunking and retrieval strategies with manual review and labeling workflows
+- **Workflow tooling:** Created reusable workflow templates and collaboration patterns that improved delivery efficiency
+- **Launch and growth:** Designed rollout plans, fallback logic, and feedback loops to monitor quality and usage data
+
+### Productivity Tools Company
+**Product Manager | Growth and Experience**
+*Jul 2020 - Dec 2022 | City*
+
+Led core workflow optimization, subscription conversion experiments, and user experience redesign for a productivity product.
+
+- **Activation flow:** Mapped the first-day user journey, reduced blockers, and improved activation and retention signals
+- **Monetization experiments:** Iterated pricing page messaging, packaging, and purchase paths to improve funnel performance
+- **Data collaboration:** Built dashboards with operations and data teams to track feature usage, churn reasons, and release impact
+
+## Projects
+
+### Enterprise Knowledge Agent
+**Product Owner | RAG / Agent Evaluation**
+*2024*
+
+- Designed the full flow from knowledge ingestion and retrieval to answer generation and human review
+- Built evaluation sets, error taxonomy, and feedback mechanisms to identify retrieval gaps, hallucinations, and context loss
+- Delivered prompt strategy, knowledge structure recommendations, and launch acceptance checklists
+
+### AI Workflow Builder
+**Product Design | Workflow / Tool Calling**
+*2023*
+
+- Designed node orchestration, parameter configuration, run logs, and error guidance for non-engineering users
+- Abstracted common task templates so teams could reuse processes and accumulate best practices
+
+## Education
+
+### University Name
+**B.A. / B.S. | Major**
+*Sep 2019 - Jul 2023 | City*
+[Top University] [Honors]
+
+- Relevant coursework: Add courses related to your target role
+- Awards or research: Add a concise outcome-oriented line
+
+## Additional
+
+- Languages: English, Mandarin
+- Links: Portfolio / GitHub / Blog
+`;
+
+export const DEFAULT_RESUME_MARKDOWN = DEFAULT_RESUME_MARKDOWN_ZH;
+
+export function getDefaultResumeMarkdown(preferredLanguages: string[] = []) {
+  return prefersEnglish(preferredLanguages)
+    ? DEFAULT_RESUME_MARKDOWN_EN
+    : DEFAULT_RESUME_MARKDOWN_ZH;
+}
+
+function prefersEnglish(preferredLanguages: string[]) {
+  const normalized = preferredLanguages.map((language) =>
+    language.trim().replace(/_/g, "-").toLowerCase()
+  );
+  const firstKnownLanguage = normalized.find((language) =>
+    language.startsWith("zh") || language.startsWith("en")
+  );
+
+  return firstKnownLanguage?.startsWith("en") || false;
+}

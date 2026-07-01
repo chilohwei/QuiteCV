@@ -1,8 +1,17 @@
 import matter from "gray-matter";
 import type { ResumeData, ResumeMetadata, ResumeSection } from "@/types/resume";
 
-export function parseResumeMarkdown(markdown: string): ResumeData {
-  const { data, content } = matter(markdown);
+interface LocalizedMarkdownBlock {
+  language: string;
+  content: string;
+}
+
+export function parseResumeMarkdown(
+  markdown: string,
+  preferredLanguages: string[] = []
+): ResumeData {
+  const localizedMarkdown = selectLocalizedMarkdown(markdown, preferredLanguages);
+  const { data, content } = matter(localizedMarkdown.content);
 
   const metadata: ResumeMetadata = {
     name: data.name || "Your Name",
@@ -12,7 +21,7 @@ export function parseResumeMarkdown(markdown: string): ResumeData {
     phone: data.phone,
     photo: data.photo,
     logo: data.logo,
-    language: data.language || "zh-CN",
+    language: data.language || localizedMarkdown.language || "zh-CN",
     tags: data.tags || [],
   };
 
@@ -23,6 +32,114 @@ export function parseResumeMarkdown(markdown: string): ResumeData {
     sections,
     rawContent: content,
   };
+}
+
+function selectLocalizedMarkdown(markdown: string, preferredLanguages: string[]) {
+  const localizedBlocks = extractLocalizedMarkdownBlocks(markdown);
+
+  if (!localizedBlocks.length) {
+    return {
+      language: "",
+      content: markdown,
+    };
+  }
+
+  const normalizedPreferredLanguages = preferredLanguages
+    .map(normalizeLanguageTag)
+    .filter(Boolean);
+  const selectedBlock = localizedBlocks
+    .map((block) => ({
+      block,
+      score: getLanguageMatchScore(block.language, normalizedPreferredLanguages),
+    }))
+    .sort((a, b) => b.score - a.score)[0]?.block || localizedBlocks[0];
+
+  return selectedBlock;
+}
+
+function extractLocalizedMarkdownBlocks(markdown: string): LocalizedMarkdownBlock[] {
+  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  const blocks: LocalizedMarkdownBlock[] = [];
+  let activeLanguage = "";
+  let activeContent: string[] = [];
+
+  for (const line of lines) {
+    const startMatch = line.match(
+      /^<!--\s*(?:resume[-\s])?language\s*:\s*([a-z]{2,3}(?:[-_][a-z0-9]{2,8})*)\s*-->\s*$/i
+    );
+    const endMatch = line.match(/^<!--\s*\/(?:resume[-\s])?language\s*-->\s*$/i);
+
+    if (startMatch) {
+      if (activeLanguage && activeContent.length) {
+        blocks.push({
+          language: normalizeLanguageTag(activeLanguage),
+          content: activeContent.join("\n").trim(),
+        });
+      }
+
+      activeLanguage = startMatch[1];
+      activeContent = [];
+      continue;
+    }
+
+    if (endMatch) {
+      if (activeLanguage) {
+        blocks.push({
+          language: normalizeLanguageTag(activeLanguage),
+          content: activeContent.join("\n").trim(),
+        });
+      }
+
+      activeLanguage = "";
+      activeContent = [];
+      continue;
+    }
+
+    if (activeLanguage) {
+      activeContent.push(line);
+    }
+  }
+
+  if (activeLanguage && activeContent.length) {
+    blocks.push({
+      language: normalizeLanguageTag(activeLanguage),
+      content: activeContent.join("\n").trim(),
+    });
+  }
+
+  return blocks.filter((block) => block.language && block.content);
+}
+
+function getLanguageMatchScore(language: string, preferredLanguages: string[]) {
+  const normalizedLanguage = normalizeLanguageTag(language);
+  const languageBase = getLanguageBase(normalizedLanguage);
+  let bestScore = 0;
+
+  preferredLanguages.forEach((preferredLanguage, index) => {
+    const preferredBase = getLanguageBase(preferredLanguage);
+    const orderBonus = Math.max(0, 10 - index);
+    let score = 0;
+
+    if (preferredLanguage === normalizedLanguage) {
+      score = 100;
+    } else if (preferredBase && preferredBase === languageBase) {
+      score = 80;
+    } else if (preferredBase === "zh" && languageBase === "zh") {
+      score = 70;
+    }
+
+    bestScore = Math.max(bestScore, score + orderBonus);
+  });
+
+  return bestScore;
+}
+
+function normalizeLanguageTag(language: string) {
+  return language.trim().replace(/_/g, "-").toLowerCase();
+}
+
+function getLanguageBase(language: string) {
+  return normalizeLanguageTag(language).split("-")[0] || "";
 }
 
 function parseSections(content: string): ResumeSection[] {

@@ -4,12 +4,16 @@
   "private": true,
   "description": "A quiet, AI-native Markdown resume workbench with A4 paginated preview and PDF export.",
   "scripts": {
+    "copy-monaco": "node scripts/copy-monaco.mjs",
+    "predev": "node scripts/copy-monaco.mjs",
     "dev": "next dev",
     "typecheck": "tsc --noEmit",
+    "prebuild": "node scripts/copy-monaco.mjs",
     "build": "next build",
+    "check": "pnpm typecheck && pnpm build",
     "start": "next start",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "preview": "node scripts/copy-monaco.mjs && opennextjs-cloudflare build && node scripts/patch-open-next-worker.mjs && opennextjs-cloudflare preview",
+    "deploy": "node scripts/copy-monaco.mjs && opennextjs-cloudflare build && node scripts/patch-open-next-worker.mjs && opennextjs-cloudflare deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {

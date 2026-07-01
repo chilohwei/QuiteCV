@@ -1,19 +1,49 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { ResumeData, ResumeSection, ResumeSectionItem, ResumeStyleConfig } from "@/types/resume";
-import { FONT_OPTIONS } from "@/types/resume";
+import { getResumeFontAudience, getResumeFontOption } from "@/types/resume";
 
 interface DefaultTemplateProps {
   data: ResumeData;
   styleConfig: ResumeStyleConfig;
+  smartOnePage?: boolean;
+  onSmartOnePageResult?: (result: {
+    fittedOnePage: boolean;
+    styleConfig: ResumeStyleConfig;
+  }) => void;
 }
 
 const MM_TO_PX = 3.7795;
 const PAGE_GAP_MM = 8;
 
-const PAGE_PROFILE = {
+interface PageProfile {
+  padX: number;
+  padY: number;
+  headerMb: number;
+  headerMin: number;
+  headerPt: number;
+  photoW: number;
+  photoH: number;
+  name: number;
+  meta: number;
+  sectionGap: number;
+  headingMb: number;
+  headingPb: number;
+  headingSize: number;
+  body: number;
+  intro: number;
+  title: number;
+  bulletMt: number;
+  bulletGap: number;
+  itemGap: number;
+  line: number;
+  introLine: number;
+  bodyLine: number;
+}
+
+const PAGE_PROFILE: PageProfile = {
   padX: 15,
   padY: 15,
   headerMb: 8,
@@ -38,7 +68,53 @@ const PAGE_PROFILE = {
   bodyLine: 1.68,
 };
 
-type PageProfile = typeof PAGE_PROFILE;
+const SMART_COMPRESSION_STEPS: Array<{
+  font: number;
+  line: number;
+  pad: number;
+  spacing: number;
+}> = [
+  { font: 1, line: 1, pad: 1, spacing: 1 },
+  { font: 1, line: 0.98, pad: 1, spacing: 0.95 },
+  { font: 0.98, line: 0.96, pad: 0.92, spacing: 0.86 },
+  { font: 0.95, line: 0.93, pad: 0.84, spacing: 0.74 },
+  { font: 0.92, line: 0.9, pad: 0.76, spacing: 0.64 },
+  { font: 0.88, line: 0.86, pad: 0.68, spacing: 0.54 },
+  { font: 0.84, line: 0.82, pad: 0.6, spacing: 0.45 },
+  { font: 0.8, line: 0.78, pad: 0.52, spacing: 0.38 },
+];
+
+type ResumeLayout = {
+  profileIndex: number;
+  pageBlockIds: string[][];
+};
+
+type MeasuredResumeLayout = ResumeLayout & {
+  totalHeight: number;
+  maxPageHeight: number;
+};
+
+type PageCandidate = {
+  profile: PageProfile;
+  styleConfig: ResumeStyleConfig;
+};
+
+type TemplateVisual = {
+  accent: string;
+  paperBg: string;
+  text: string;
+  muted: string;
+  headingText: string;
+  headingBorder: string;
+  headingBg: string;
+  headingRadius: string;
+  headingPaddingX: string;
+  headingPaddingY: string;
+  headerRule: "none" | "top" | "left" | "band";
+  photoRadius: string;
+  tagBg: string;
+  tagText: string;
+};
 
 type ResumeBlock =
   | { id: string; kind: "header" }
@@ -48,11 +124,287 @@ type ResumeBlock =
   | { id: string; kind: "education-item"; title: string; item: ResumeSectionItem; showHeading: boolean; isLastInSection: boolean; hasBullets: boolean }
   | { id: string; kind: "generic"; section: ResumeSection };
 
-export function DefaultTemplate({ data, styleConfig }: DefaultTemplateProps) {
+function createBasePageProfile(styleConfig: ResumeStyleConfig): PageProfile {
+  const fontScale = clampProfileValue(styleConfig.fontSize, 7.2, 12.4) / PAGE_PROFILE.body;
+  const lineHeight = clampProfileValue(styleConfig.lineHeight, 1.08, 1.84);
+  const pagePadding = clampProfileValue(styleConfig.pagePadding, 6, 26);
+  const sectionSpacing = clampProfileValue(styleConfig.sectionSpacing, 0.35, 1.28);
+
+  return {
+    ...PAGE_PROFILE,
+    padX: roundProfileValue(pagePadding),
+    padY: roundProfileValue(pagePadding),
+    headerMb: roundProfileValue(PAGE_PROFILE.headerMb * sectionSpacing),
+    name: roundProfileValue(PAGE_PROFILE.name * fontScale),
+    meta: roundProfileValue(PAGE_PROFILE.meta * fontScale),
+    sectionGap: roundProfileValue(PAGE_PROFILE.sectionGap * sectionSpacing),
+    headingMb: roundProfileValue(PAGE_PROFILE.headingMb * sectionSpacing),
+    headingPb: roundProfileValue(PAGE_PROFILE.headingPb * sectionSpacing),
+    headingSize: roundProfileValue(PAGE_PROFILE.headingSize * fontScale),
+    body: roundProfileValue(PAGE_PROFILE.body * fontScale),
+    intro: roundProfileValue(PAGE_PROFILE.intro * fontScale),
+    title: roundProfileValue(PAGE_PROFILE.title * fontScale),
+    bulletMt: roundProfileValue(PAGE_PROFILE.bulletMt * sectionSpacing),
+    bulletGap: roundProfileValue(PAGE_PROFILE.bulletGap * sectionSpacing),
+    itemGap: roundProfileValue(PAGE_PROFILE.itemGap * sectionSpacing),
+    line: roundProfileValue(lineHeight),
+    introLine: roundProfileValue(lineHeight + (PAGE_PROFILE.introLine - PAGE_PROFILE.line)),
+    bodyLine: roundProfileValue(lineHeight + (PAGE_PROFILE.bodyLine - PAGE_PROFILE.line)),
+  };
+}
+
+function createSmartPageCandidates(styleConfig: ResumeStyleConfig): PageCandidate[] {
+  return SMART_COMPRESSION_STEPS.map((step) =>
+    createPageCandidate({
+      ...styleConfig,
+      fontSize: styleConfig.fontSize * step.font,
+      lineHeight: styleConfig.lineHeight * step.line,
+      pagePadding: styleConfig.pagePadding * step.pad,
+      sectionSpacing: styleConfig.sectionSpacing * step.spacing,
+    })
+  );
+}
+
+function createPageCandidate(styleConfig: ResumeStyleConfig): PageCandidate {
+  const nextStyleConfig = {
+    ...styleConfig,
+    fontSize: clampProfileValue(styleConfig.fontSize, 7.2, 12.4),
+    lineHeight: clampProfileValue(styleConfig.lineHeight, 1.08, 1.84),
+    pagePadding: clampProfileValue(styleConfig.pagePadding, 6, 26),
+    sectionSpacing: clampProfileValue(styleConfig.sectionSpacing, 0.35, 1.28),
+  };
+
+  return {
+    profile: createBasePageProfile(nextStyleConfig),
+    styleConfig: {
+      ...nextStyleConfig,
+      fontSize: roundProfileValue(nextStyleConfig.fontSize),
+      lineHeight: roundProfileValue(nextStyleConfig.lineHeight),
+      pagePadding: roundProfileValue(nextStyleConfig.pagePadding),
+      sectionSpacing: roundProfileValue(nextStyleConfig.sectionSpacing),
+    },
+  };
+}
+
+function clampProfileValue(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function roundProfileValue(value: number) {
+  return Number(value.toFixed(3));
+}
+
+function getPageStyle(page: PageProfile, fontFamily: string): CSSProperties {
+  return {
+    fontFamily,
+    fontSize: `${page.body}pt`,
+    lineHeight: page.line,
+  };
+}
+
+function getTemplateVisual(styleConfig: ResumeStyleConfig): TemplateVisual {
+  const accent = styleConfig.themeColor || "#1a56db";
+
+  switch (styleConfig.templateId) {
+    case "product":
+      return {
+        accent,
+        paperBg: "#fbfffe",
+        text: "#10201d",
+        muted: "#36524d",
+        headingText: "#10201d",
+        headingBorder: accent,
+        headingBg: "rgba(15, 118, 110, 0.08)",
+        headingRadius: "2mm",
+        headingPaddingX: "2mm",
+        headingPaddingY: "0.9mm",
+        headerRule: "left",
+        photoRadius: "2mm",
+        tagBg: "rgba(15, 118, 110, 0.1)",
+        tagText: accent,
+      };
+    case "engineer":
+      return {
+        accent,
+        paperBg: "#ffffff",
+        text: "#111827",
+        muted: "#374151",
+        headingText: "#111827",
+        headingBorder: accent,
+        headingBg: "rgba(37, 99, 235, 0.06)",
+        headingRadius: "1mm",
+        headingPaddingX: "1.8mm",
+        headingPaddingY: "0.7mm",
+        headerRule: "top",
+        photoRadius: "0.75mm",
+        tagBg: "rgba(37, 99, 235, 0.1)",
+        tagText: accent,
+      };
+    case "creative":
+      return {
+        accent,
+        paperBg: "#fffdf8",
+        text: "#211a16",
+        muted: "#5f5047",
+        headingText: "#211a16",
+        headingBorder: "transparent",
+        headingBg: "rgba(180, 83, 9, 0.11)",
+        headingRadius: "999px",
+        headingPaddingX: "2.2mm",
+        headingPaddingY: "0.9mm",
+        headerRule: "band",
+        photoRadius: "999px",
+        tagBg: "rgba(180, 83, 9, 0.12)",
+        tagText: accent,
+      };
+    case "executive":
+      return {
+        accent,
+        paperBg: "#fdfdfb",
+        text: "#16181d",
+        muted: "#4b5563",
+        headingText: "#16181d",
+        headingBorder: "rgba(79, 93, 117, 0.72)",
+        headingBg: "transparent",
+        headingRadius: "0",
+        headingPaddingX: "0",
+        headingPaddingY: "0",
+        headerRule: "top",
+        photoRadius: "0",
+        tagBg: "rgba(79, 93, 117, 0.1)",
+        tagText: accent,
+      };
+    case "classic":
+    default:
+      return {
+        accent,
+        paperBg: "#ffffff",
+        text: "#101010",
+        muted: "#333333",
+        headingText: "#101010",
+        headingBorder: "rgba(16, 16, 16, 0.55)",
+        headingBg: "transparent",
+        headingRadius: "0",
+        headingPaddingX: "0",
+        headingPaddingY: "0",
+        headerRule: "none",
+        photoRadius: "0",
+        tagBg: "#edf4ff",
+        tagText: accent,
+      };
+  }
+}
+
+function getContentStyle(page: PageProfile, visual: TemplateVisual): CSSProperties {
+  return {
+    "--resume-section-gap": `${page.sectionGap}mm`,
+    "--resume-heading-mb": `${page.headingMb}mm`,
+    "--resume-heading-pb": `${page.headingPb}mm`,
+    "--resume-heading-size": `${page.headingSize}pt`,
+    "--resume-heading-border": visual.headingBorder,
+    "--resume-heading-bg": visual.headingBg,
+    "--resume-heading-fg": visual.headingText,
+    "--resume-heading-radius": visual.headingRadius,
+    "--resume-heading-px": visual.headingPaddingX,
+    "--resume-heading-py": visual.headingPaddingY,
+    color: visual.text,
+    padding: `${page.padY}mm ${page.padX}mm`,
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
+  } as CSSProperties;
+}
+
+function measureLayout(
+  measure: HTMLDivElement | null,
+  page: PageProfile,
+  profileIndex: number,
+  blocks: ResumeBlock[]
+): MeasuredResumeLayout | null {
+  if (!measure) return null;
+
+  const nodes = Array.from(
+    measure.querySelectorAll<HTMLElement>("[data-resume-block-id]")
+  );
+
+  if (!nodes.length) return null;
+
+  const measuredBlocks = nodes.flatMap((node) => {
+    const id = node.dataset.resumeBlockId;
+    if (!id) return [];
+
+    const computed = window.getComputedStyle(node);
+    const height =
+      node.offsetHeight +
+      parseFloat(computed.marginTop || "0") +
+      parseFloat(computed.marginBottom || "0");
+
+    return [{ id, height }];
+  });
+  const maxPageHeight = 297 * MM_TO_PX - page.padY * 2 * MM_TO_PX;
+  const nextPages: string[][] = [];
+  let currentPage: string[] = [];
+  let currentHeight = 0;
+  let totalHeight = 0;
+
+  for (let index = 0; index < measuredBlocks.length; index += 1) {
+    const { id, height } = measuredBlocks[index];
+    const wouldOverflow = currentPage.length > 0 && currentHeight + height > maxPageHeight;
+
+    if (wouldOverflow) {
+      nextPages.push(currentPage);
+      currentPage = [id];
+      currentHeight = height;
+    } else {
+      currentPage.push(id);
+      currentHeight += height;
+    }
+
+    totalHeight += height;
+  }
+
+  if (currentPage.length) {
+    nextPages.push(currentPage);
+  }
+
+  return {
+    profileIndex,
+    pageBlockIds: nextPages.length ? nextPages : [blocks.map((block) => block.id)],
+    totalHeight,
+    maxPageHeight,
+  };
+}
+
+function fitsOnePage(layout: MeasuredResumeLayout) {
+  return layout.pageBlockIds.length <= 1 && layout.totalHeight <= layout.maxPageHeight;
+}
+
+export function DefaultTemplate({
+  data,
+  styleConfig,
+  smartOnePage = false,
+  onSmartOnePageResult,
+}: DefaultTemplateProps) {
   const { metadata, sections } = data;
-  const measureRef = useRef<HTMLDivElement>(null);
-  const [pageBlockIds, setPageBlockIds] = useState<string[][]>([]);
-  const fontOption = FONT_OPTIONS.find((f) => f.id === styleConfig.fontFamily) || FONT_OPTIONS[0];
+  const measureRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const onePageResultRef = useRef(onSmartOnePageResult);
+  const [layout, setLayout] = useState<ResumeLayout>({
+    profileIndex: 0,
+    pageBlockIds: [],
+  });
+  useEffect(() => {
+    onePageResultRef.current = onSmartOnePageResult;
+  }, [onSmartOnePageResult]);
+
+  const basePageCandidate = useMemo(() => createPageCandidate(styleConfig), [styleConfig]);
+  const smartCandidates = useMemo(() => createSmartPageCandidates(styleConfig), [styleConfig]);
+  const pageCandidates = useMemo(
+    () => (smartOnePage ? smartCandidates : [basePageCandidate]),
+    [basePageCandidate, smartOnePage, smartCandidates]
+  );
+  const pageProfiles = useMemo(
+    () => pageCandidates.map((candidate) => candidate.profile),
+    [pageCandidates]
+  );
   const introSection = findSection(sections, ["简介", "Profile", "Summary"]);
   const highlightsSection = findSection(sections, ["亮点", "优势", "Highlights"]);
   const skillsSection = findSection(sections, ["技能", "工具", "Skills"]);
@@ -74,7 +426,7 @@ export function DefaultTemplate({ data, styleConfig }: DefaultTemplateProps) {
   const roleTitle = metadata.tags?.find((tag) => tag.includes("产品")) || metadata.title || primaryRole?.subtitle || "AI Agent 产品经理";
   const availability = metadata.tags?.find((tag) => tag.includes("离职") || tag.includes("到岗"));
   const identityLine = [availability, roleTitle].filter(Boolean).join("  |  ");
-  const page = PAGE_PROFILE;
+  const page = pageProfiles[layout.profileIndex] || pageProfiles[0];
   const blocks = useMemo(
     () =>
       buildResumeBlocks({
@@ -102,118 +454,81 @@ export function DefaultTemplate({ data, styleConfig }: DefaultTemplateProps) {
     () => new Map(blocks.map((block) => [block.id, block])),
     [blocks]
   );
-  const pageIds = pageBlockIds.length ? pageBlockIds : [blocks.map((block) => block.id)];
-  const fitVariables = {
-    "--resume-section-gap": `${page.sectionGap}mm`,
-    "--resume-heading-mb": `${page.headingMb}mm`,
-    "--resume-heading-pb": `${page.headingPb}mm`,
-    "--resume-heading-size": `${page.headingSize}pt`,
-  } as CSSProperties;
-  const pageStyle = {
-    fontFamily: fontOption.family,
-    fontSize: `${page.body}pt`,
-    lineHeight: page.line,
-  } as CSSProperties;
-  const contentStyle = {
-    ...fitVariables,
-    color: "#101010",
-    padding: `${page.padY}mm ${page.padX}mm`,
-    overflowWrap: "anywhere",
-    wordBreak: "break-word",
-  } as CSSProperties;
+  const pageIds = layout.pageBlockIds.length ? layout.pageBlockIds : [blocks.map((block) => block.id)];
+  const fontOption = getResumeFontOption(
+    styleConfig.fontId,
+    getResumeFontAudience(metadata.language)
+  );
+  const pageStyle = getPageStyle(page, fontOption.family);
+  const templateVisual = getTemplateVisual(styleConfig);
+  const contentStyle = getContentStyle(page, templateVisual);
 
   useLayoutEffect(() => {
-    const measure = measureRef.current;
-    if (!measure) return;
+    const measuredLayouts = pageProfiles
+      .map((profile, index) =>
+        measureLayout(measureRefs.current[index], profile, index, blocks)
+      )
+      .filter((item): item is MeasuredResumeLayout => Boolean(item));
 
-    const nodes = Array.from(
-      measure.querySelectorAll<HTMLElement>("[data-resume-block-id]")
-    );
-
-    if (!nodes.length) {
-      setPageBlockIds([]);
+    if (!measuredLayouts.length) {
+      setLayout((previous) =>
+        previous.profileIndex !== 0 || previous.pageBlockIds.length
+          ? { profileIndex: 0, pageBlockIds: [] }
+          : previous
+      );
       return;
     }
 
-    const measuredBlocks = nodes.flatMap((node) => {
-      const id = node.dataset.resumeBlockId;
-      if (!id) return [];
+    const selectedLayout = smartOnePage
+      ? measuredLayouts.find((item) => fitsOnePage(item)) || measuredLayouts[measuredLayouts.length - 1]
+      : measuredLayouts[0];
+    const nextLayout: ResumeLayout = {
+      profileIndex: selectedLayout.profileIndex,
+      pageBlockIds: selectedLayout.pageBlockIds.length
+        ? selectedLayout.pageBlockIds
+        : [blocks.map((block) => block.id)],
+    };
 
-      const computed = window.getComputedStyle(node);
-      const height =
-        node.offsetHeight +
-        parseFloat(computed.marginTop || "0") +
-        parseFloat(computed.marginBottom || "0");
-
-      return [{ id, height }];
-    });
-    const maxPageHeight = 297 * MM_TO_PX - page.padY * 2 * MM_TO_PX;
-    const nextPages: string[][] = [];
-    let currentPage: string[] = [];
-    let currentHeight = 0;
-
-    for (let index = 0; index < measuredBlocks.length; index += 1) {
-      const { id, height } = measuredBlocks[index];
-      const block = blockById.get(id);
-      const sectionHeight = block && startsSection(block)
-        ? measureSectionHeight(measuredBlocks, index, blockById)
-        : 0;
-      const shouldMoveWholeSection =
-        currentPage.length > 0 &&
-        sectionHeight > 0 &&
-        sectionHeight <= maxPageHeight &&
-        currentHeight + sectionHeight > maxPageHeight;
-
-      if (shouldMoveWholeSection) {
-        nextPages.push(currentPage);
-        currentPage = [];
-        currentHeight = 0;
-      }
-
-      const wouldOverflow = currentPage.length > 0 && currentHeight + height > maxPageHeight;
-
-      if (wouldOverflow) {
-        nextPages.push(currentPage);
-        currentPage = [id];
-        currentHeight = height;
-      } else {
-        currentPage.push(id);
-        currentHeight += height;
-      }
-    }
-
-    if (currentPage.length) {
-      nextPages.push(currentPage);
-    }
-
-    const normalizedPages = nextPages.length ? nextPages : [blocks.map((block) => block.id)];
-    setPageBlockIds((previous) =>
-      samePages(previous, normalizedPages) ? previous : normalizedPages
+    setLayout((previous) =>
+      sameLayout(previous, nextLayout) ? previous : nextLayout
     );
-  }, [blockById, blocks, page.padY]);
+
+    if (smartOnePage) {
+      onePageResultRef.current?.({
+        fittedOnePage: fitsOnePage(selectedLayout),
+        styleConfig: pageCandidates[selectedLayout.profileIndex]?.styleConfig || styleConfig,
+      });
+    }
+  }, [blockById, blocks, pageCandidates, pageProfiles, smartOnePage, styleConfig]);
 
   return (
     <>
-      <div
-        ref={measureRef}
-        aria-hidden="true"
-        className="no-print pointer-events-none fixed left-[-10000px] top-0 opacity-0"
-        style={{ ...pageStyle, width: "210mm" }}
-      >
-        <div style={contentStyle}>
-          {blocks.map((block) => (
-            <ResumeBlockView
-              key={`measure-${block.id}`}
-              block={block}
-              metadata={metadata}
-              identityLine={identityLine}
-              themeColor={styleConfig.themeColor}
-              page={page}
-              measuring
-            />
-          ))}
+      {pageProfiles.map((profile, index) => (
+        <div
+          key={`measure-profile-${index}`}
+          ref={(node) => {
+            measureRefs.current[index] = node;
+          }}
+          aria-hidden="true"
+          className="no-print pointer-events-none fixed left-[-10000px] top-0 opacity-0"
+          style={{ ...getPageStyle(profile, fontOption.family), width: "210mm" }}
+        >
+          <div style={getContentStyle(profile, templateVisual)}>
+            {blocks.map((block) => (
+              <ResumeBlockView
+                key={`measure-${index}-${block.id}`}
+                block={block}
+                metadata={metadata}
+                identityLine={identityLine}
+                themeColor={styleConfig.themeColor}
+                page={profile}
+                visual={templateVisual}
+                measuring
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      ))}
 
       <div
         className="resume-pages mx-auto flex items-start"
@@ -223,7 +538,7 @@ export function DefaultTemplate({ data, styleConfig }: DefaultTemplateProps) {
           <article
             key={`page-${pageIndex}`}
             className="resume-paper recruiter-resume h-[297mm] w-[210mm] overflow-hidden bg-white text-[#101010]"
-            style={pageStyle}
+            style={{ ...pageStyle, backgroundColor: templateVisual.paperBg, color: templateVisual.text }}
           >
             <div style={contentStyle}>
               {ids.map((id) => {
@@ -238,6 +553,7 @@ export function DefaultTemplate({ data, styleConfig }: DefaultTemplateProps) {
                     identityLine={identityLine}
                     themeColor={styleConfig.themeColor}
                     page={page}
+                    visual={templateVisual}
                   />
                 );
               })}
@@ -385,6 +701,7 @@ function ResumeBlockView({
   identityLine,
   themeColor,
   page,
+  visual,
   measuring,
 }: {
   block: ResumeBlock;
@@ -392,6 +709,7 @@ function ResumeBlockView({
   identityLine: string;
   themeColor: string;
   page: PageProfile;
+  visual: TemplateVisual;
   measuring?: boolean;
 }) {
   const dataProps = measuring ? { "data-resume-block-id": block.id } : {};
@@ -400,7 +718,7 @@ function ResumeBlockView({
     case "header":
       return (
         <div {...dataProps} style={{ marginBottom: `${page.headerMb}mm` }}>
-          <HeaderBlock metadata={metadata} identityLine={identityLine} page={page} />
+          <HeaderBlock metadata={metadata} identityLine={identityLine} page={page} visual={visual} />
         </div>
       );
     case "paragraph":
@@ -408,10 +726,10 @@ function ResumeBlockView({
         <div {...dataProps} style={{ marginBottom: `${page.sectionGap}mm` }}>
           <ResumeSectionBlock title={block.title}>
             <p
-              className="text-[#202020]"
               style={{
                 fontSize: `${block.intro ? page.intro : page.body}pt`,
                 lineHeight: block.intro ? page.introLine : page.bodyLine,
+                color: visual.text,
               }}
             >
               {block.text}
@@ -430,6 +748,7 @@ function ResumeBlockView({
             text={block.text}
             themeColor={themeColor}
             page={page}
+            visual={visual}
             first={block.first}
           />
         </div>
@@ -445,7 +764,7 @@ function ResumeBlockView({
           }}
         >
           {block.showHeading && <SectionHeading title={block.title} />}
-          <WorkItem item={block.item} themeColor={themeColor} page={page} showBullets={false} />
+          <WorkItem item={block.item} themeColor={themeColor} page={page} visual={visual} showBullets={false} />
         </div>
       );
     case "education-item":
@@ -459,14 +778,14 @@ function ResumeBlockView({
           }}
         >
           {block.showHeading && <SectionHeading title={block.title} />}
-          <EducationItem item={block.item} themeColor={themeColor} page={page} showBullets={false} />
+          <EducationItem item={block.item} themeColor={themeColor} page={page} visual={visual} showBullets={false} />
         </div>
       );
     case "generic":
       return (
         <div {...dataProps} style={{ marginBottom: `${page.sectionGap}mm` }}>
           <ResumeSectionBlock title={block.section.title}>
-            <GenericSectionContent section={block.section} themeColor={themeColor} page={page} />
+            <GenericSectionContent section={block.section} themeColor={themeColor} page={page} visual={visual} />
           </ResumeSectionBlock>
         </div>
       );
@@ -479,18 +798,34 @@ function HeaderBlock({
   metadata,
   identityLine,
   page,
+  visual,
 }: {
   metadata: ResumeData["metadata"];
   identityLine: string;
   page: PageProfile;
+  visual: TemplateVisual;
 }) {
   return (
     <header
-      className="relative text-center"
+      className="relative text-left"
       style={{
         minHeight: `${page.headerMin}mm`,
+        paddingLeft: visual.headerRule === "left" ? "4mm" : undefined,
+        paddingTop: visual.headerRule === "top" ? "3mm" : undefined,
+        borderTop: visual.headerRule === "top" ? `1.2mm solid ${visual.accent}` : undefined,
+        background:
+          visual.headerRule === "band"
+            ? `linear-gradient(90deg, ${visual.accent}16, transparent 58%)`
+            : undefined,
       }}
     >
+      {visual.headerRule === "left" && (
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-0 h-full w-[1.1mm]"
+          style={{ backgroundColor: visual.accent }}
+        />
+      )}
       {metadata.photo && (
         <img
           src={metadata.photo}
@@ -502,31 +837,38 @@ function HeaderBlock({
           style={{
             width: `${page.photoW}mm`,
             height: `${page.photoH}mm`,
+            borderRadius: visual.photoRadius,
           }}
         />
       )}
 
-      <div className="mx-auto max-w-[118mm]" style={{ paddingTop: `${page.headerPt}mm` }}>
-        <h1 className="font-semibold leading-none" style={{ fontSize: `${page.name}pt` }}>
+      <div
+        className="max-w-[142mm]"
+        style={{
+          paddingTop: `${page.headerPt}mm`,
+          paddingRight: metadata.photo ? `${page.photoW + 8}mm` : undefined,
+        }}
+      >
+        <h1 className="font-semibold leading-none" style={{ fontSize: `${page.name}pt`, color: visual.text }}>
           {metadata.name}
         </h1>
         <div
-          className="text-[#222]"
           style={{
             marginTop: `${Math.max(1.4, page.headerMb / 2.1)}mm`,
             fontSize: `${page.meta}pt`,
             lineHeight: 1.36,
+            color: visual.muted,
           }}
         >
           {joinInline([metadata.phone, metadata.email, metadata.location])}
         </div>
         {identityLine && (
           <div
-            className="text-[#222]"
             style={{
               marginTop: `${Math.max(0.8, page.headerMb / 4.2)}mm`,
               fontSize: `${page.meta}pt`,
               lineHeight: 1.36,
+              color: visual.muted,
             }}
           >
             {identityLine}
@@ -558,9 +900,12 @@ function SectionHeading({ title }: { title: string }) {
       className="border-b font-semibold leading-tight"
       style={{
         marginBottom: "var(--resume-heading-mb)",
-        paddingBottom: "var(--resume-heading-pb)",
+        padding: "var(--resume-heading-py) var(--resume-heading-px) var(--resume-heading-pb)",
         fontSize: "var(--resume-heading-size)",
-        borderColor: "rgba(16, 16, 16, 0.55)",
+        borderColor: "var(--resume-heading-border)",
+        background: "var(--resume-heading-bg)",
+        borderRadius: "var(--resume-heading-radius)",
+        color: "var(--resume-heading-fg)",
       }}
     >
       {title}
@@ -572,26 +917,28 @@ function WorkItem({
   item,
   themeColor,
   page,
+  visual,
   showBullets = true,
 }: {
   item: ResumeSectionItem;
   themeColor: string;
   page: PageProfile;
+  visual: TemplateVisual;
   showBullets?: boolean;
 }) {
   return (
     <div>
       <div className="flex items-baseline justify-between gap-8">
         <h3
-          className="font-semibold leading-snug text-[#111]"
-          style={{ fontSize: `${page.title}pt` }}
+          className="font-semibold leading-snug"
+          style={{ fontSize: `${page.title}pt`, color: visual.text }}
         >
           {item.title}
         </h3>
         {item.date && (
           <span
-            className="shrink-0 leading-snug text-[#222]"
-            style={{ fontSize: `${page.body}pt` }}
+            className="shrink-0 leading-snug"
+            style={{ fontSize: `${page.body}pt`, color: visual.muted }}
           >
             {item.date}
           </span>
@@ -600,10 +947,11 @@ function WorkItem({
 
       {(item.subtitle || item.location) && (
         <div
-          className="flex items-baseline justify-between gap-8 text-[#333]"
+          className="flex items-baseline justify-between gap-8"
           style={{
             marginTop: `${page.bulletMt}mm`,
             fontSize: `${page.body}pt`,
+            color: visual.muted,
           }}
         >
           {item.subtitle && <span>{item.subtitle}</span>}
@@ -613,11 +961,11 @@ function WorkItem({
 
       {item.description && (
         <p
-          className="text-[#222]"
           style={{
             marginTop: `${page.bulletMt}mm`,
             fontSize: `${page.body}pt`,
             lineHeight: page.bodyLine,
+            color: visual.text,
           }}
           dangerouslySetInnerHTML={{
             __html: formatInline(item.description, themeColor),
@@ -626,7 +974,7 @@ function WorkItem({
       )}
 
       {showBullets && item.bullets && item.bullets.length > 0 && (
-        <BulletList bullets={item.bullets} themeColor={themeColor} page={page} />
+        <BulletList bullets={item.bullets} themeColor={themeColor} page={page} visual={visual} />
       )}
     </div>
   );
@@ -636,15 +984,17 @@ function GenericSectionContent({
   section,
   themeColor,
   page,
+  visual,
 }: {
   section: ResumeSection;
   themeColor: string;
   page: PageProfile;
+  visual: TemplateVisual;
 }) {
   const bullets = markdownBullets(section.content);
 
   if (bullets.length) {
-    return <BulletList bullets={bullets} themeColor={themeColor} page={page} dense />;
+    return <BulletList bullets={bullets} themeColor={themeColor} page={page} visual={visual} dense />;
   }
 
   const text = sectionToPlainText(section);
@@ -652,10 +1002,10 @@ function GenericSectionContent({
 
   return (
     <p
-      className="text-[#222]"
       style={{
         fontSize: `${page.body}pt`,
         lineHeight: page.bodyLine,
+        color: visual.text,
       }}
       dangerouslySetInnerHTML={{
         __html: formatInline(text, themeColor),
@@ -668,11 +1018,13 @@ function EducationItem({
   item,
   themeColor,
   page,
+  visual,
   showBullets = true,
 }: {
   item: ResumeSectionItem;
   themeColor: string;
   page: PageProfile;
+  visual: TemplateVisual;
   showBullets?: boolean;
 }) {
   return (
@@ -680,15 +1032,16 @@ function EducationItem({
       <div className="flex items-baseline justify-between gap-8">
         <div className="flex flex-wrap items-center gap-2">
           <h3
-            className="font-semibold text-[#111]"
-            style={{ fontSize: `${page.title}pt` }}
+            className="font-semibold"
+            style={{ fontSize: `${page.title}pt`, color: visual.text }}
           >
             {item.title}
           </h3>
           {item.tags?.map((tag, index) => (
             <span
               key={`${tag}-${index}`}
-              className="rounded-sm bg-[#edf4ff] px-1.5 py-0.5 text-[8pt] leading-none text-[#3573c9]"
+              className="rounded-sm px-1.5 py-0.5 text-[8pt] leading-none"
+              style={{ backgroundColor: visual.tagBg, color: visual.tagText }}
             >
               {tag}
             </span>
@@ -696,8 +1049,8 @@ function EducationItem({
         </div>
         {item.date && (
           <span
-            className="shrink-0 text-[#222]"
-            style={{ fontSize: `${page.body}pt` }}
+            className="shrink-0"
+            style={{ fontSize: `${page.body}pt`, color: visual.muted }}
           >
             {item.date}
           </span>
@@ -706,10 +1059,11 @@ function EducationItem({
 
       {(item.subtitle || item.location) && (
         <div
-          className="flex items-baseline justify-between gap-8 text-[#333]"
+          className="flex items-baseline justify-between gap-8"
           style={{
             marginTop: `${page.bulletMt}mm`,
             fontSize: `${page.body}pt`,
+            color: visual.muted,
           }}
         >
           {item.subtitle && <span>{item.subtitle}</span>}
@@ -718,7 +1072,7 @@ function EducationItem({
       )}
 
       {showBullets && item.bullets && item.bullets.length > 0 && (
-        <BulletList bullets={item.bullets} themeColor={themeColor} page={page} dense />
+        <BulletList bullets={item.bullets} themeColor={themeColor} page={page} visual={visual} dense />
       )}
     </div>
   );
@@ -728,22 +1082,25 @@ function BulletLine({
   text,
   themeColor,
   page,
+  visual,
   first,
 }: {
   text: string;
   themeColor: string;
   page: PageProfile;
+  visual: TemplateVisual;
   first?: boolean;
 }) {
   return (
     <ul
-      className="pl-4 text-[#222]"
+      className="pl-4"
       style={{
         listStyleType: "disc",
         marginTop: first ? `${page.bulletMt}mm` : 0,
         marginBottom: "0",
         fontSize: `${page.body}pt`,
         lineHeight: page.bodyLine,
+        color: visual.text,
       }}
     >
       <li
@@ -760,24 +1117,27 @@ function BulletList({
   bullets,
   themeColor,
   page,
+  visual,
   dense,
 }: {
   bullets: string[];
   themeColor: string;
   page: PageProfile;
+  visual: TemplateVisual;
   dense?: boolean;
 }) {
   if (!bullets.length) return null;
 
   return (
     <ul
-      className="pl-4 text-[#222]"
+      className="pl-4"
       style={{
         listStyleType: "disc",
         marginTop: `${page.bulletMt}mm`,
         marginBottom: "0",
         fontSize: `${page.body}pt`,
         lineHeight: page.bodyLine,
+        color: visual.text,
       }}
     >
       {bullets.map((bullet, index) => (
@@ -807,40 +1167,6 @@ function blockGap(
   if (after === "section") return page.sectionGap;
   if (after === "item") return page.itemGap;
   return dense ? Math.max(0, page.bulletGap - 0.45) : page.bulletGap;
-}
-
-function startsSection(block: ResumeBlock) {
-  if (block.kind === "paragraph" || block.kind === "generic") return true;
-  if (block.kind === "bullet-line") return Boolean(block.title);
-  if (block.kind === "work-item" || block.kind === "education-item") return block.showHeading;
-  return false;
-}
-
-function endsSection(block: ResumeBlock) {
-  if (block.kind === "header" || block.kind === "paragraph" || block.kind === "generic") return true;
-  if (block.kind === "bullet-line") return block.after === "section";
-  if (block.kind === "work-item" || block.kind === "education-item") {
-    return block.isLastInSection && !block.hasBullets;
-  }
-  return false;
-}
-
-function measureSectionHeight(
-  measuredBlocks: Array<{ id: string; height: number }>,
-  startIndex: number,
-  blockById: Map<string, ResumeBlock>
-) {
-  let height = 0;
-
-  for (let index = startIndex; index < measuredBlocks.length; index += 1) {
-    const measured = measuredBlocks[index];
-    const block = blockById.get(measured.id);
-    height += measured.height;
-
-    if (block && endsSection(block)) break;
-  }
-
-  return height;
 }
 
 function findSection(sections: ResumeData["sections"], keywords: string[]) {
@@ -908,16 +1234,40 @@ function stripMarkdown(text: string) {
 }
 
 function formatInline(text: string, themeColor: string): string {
-  let formatted = text.replace(
-    /\*\*(.*?)\*\*/g,
-    '<strong style="font-weight: 650; color: #111">$1</strong>'
-  );
+  const safeThemeColor = isSafeHexColor(themeColor) ? themeColor : "#1a56db";
+  const escaped = escapeHtml(text);
 
-  formatted = formatted.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    `<a href="$2" style="color: ${themeColor}; text-decoration: underline" target="_blank" rel="noopener noreferrer">$1</a>`
-  );
-  return formatted;
+  return escaped
+    .replace(
+      /\*\*(.*?)\*\*/g,
+      '<strong style="font-weight: 650; color: #111">$1</strong>'
+    )
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, href: string) => {
+      const safeHref = sanitizeLinkHref(href);
+      if (!safeHref) return label;
+
+      return `<a href="${safeHref}" style="color: ${safeThemeColor}; text-decoration: underline" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    });
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeLinkHref(href: string) {
+  const value = href.trim();
+  if (/^(https?:|mailto:|tel:)/i.test(value)) return escapeHtml(value);
+
+  return "";
+}
+
+function isSafeHexColor(value: string) {
+  return /^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i.test(value);
 }
 
 function samePages(a: string[][], b: string[][]) {
@@ -927,4 +1277,8 @@ function samePages(a: string[][], b: string[][]) {
     const nextPage = b[pageIndex];
     return page.length === nextPage.length && page.every((id, idIndex) => id === nextPage[idIndex]);
   });
+}
+
+function sameLayout(a: ResumeLayout, b: ResumeLayout) {
+  return a.profileIndex === b.profileIndex && samePages(a.pageBlockIds, b.pageBlockIds);
 }
