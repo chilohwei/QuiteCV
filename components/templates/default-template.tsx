@@ -416,10 +416,12 @@ export function DefaultTemplate({
   }, [onSmartOnePageResult]);
 
   const basePageCandidate = useMemo(() => createPageCandidate(styleConfig), [styleConfig]);
-  const smartCandidates = useMemo(() => createSmartPageCandidates(styleConfig), [styleConfig]);
+  // The 22 interpolated smart-one-page candidates are only needed while that
+  // mode is active — computing them on every styleConfig change (e.g. every
+  // slider drag in the format panel) when smartOnePage is off is wasted work.
   const pageCandidates = useMemo(
-    () => (smartOnePage ? smartCandidates : [basePageCandidate]),
-    [basePageCandidate, smartOnePage, smartCandidates]
+    () => (smartOnePage ? createSmartPageCandidates(styleConfig) : [basePageCandidate]),
+    [basePageCandidate, smartOnePage, styleConfig]
   );
   const pageProfiles = useMemo(
     () => pageCandidates.map((candidate) => candidate.profile),

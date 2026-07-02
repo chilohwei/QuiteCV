@@ -22,6 +22,7 @@ const DEFAULT_TEMPLATE_PHOTO = "/photo.jpg";
 const SUPPORTED_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_PHOTO_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const AUTOSAVE_DELAY = 1000;
+const PREVIEW_PARSE_DELAY = 150;
 const LEGACY_WORKBENCH_STYLE_CONFIG: ResumeStyleConfig = {
   themeColor: "#1677ff",
   templateId: "classic",
@@ -67,6 +68,7 @@ export default function ResumePage() {
   const printRef = useRef<HTMLDivElement>(null);
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const noticeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const parseTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -91,17 +93,32 @@ export default function ResumePage() {
     setIsLoaded(true);
   }, []);
 
-  // Parse markdown when it changes
+  // Parse markdown when it changes. Debounced: parsing feeds straight into
+  // the preview's layout-measurement pass (forced synchronous reflow), so
+  // re-running it on every keystroke causes visible typing lag on longer
+  // resumes. A short delay keeps the preview feeling live without redoing
+  // that work per character.
   useEffect(() => {
     if (!markdown) return;
 
-    try {
-      const data = parseResumeMarkdown(markdown, preferredLanguages);
-      setResumeData(data);
-
-    } catch {
-      // Keep previous data on parse error
+    if (parseTimerRef.current) {
+      clearTimeout(parseTimerRef.current);
     }
+
+    parseTimerRef.current = setTimeout(() => {
+      try {
+        const data = parseResumeMarkdown(markdown, preferredLanguages);
+        setResumeData(data);
+      } catch {
+        // Keep previous data on parse error
+      }
+    }, PREVIEW_PARSE_DELAY);
+
+    return () => {
+      if (parseTimerRef.current) {
+        clearTimeout(parseTimerRef.current);
+      }
+    };
   }, [markdown, preferredLanguages]);
 
   // Autosave markdown
