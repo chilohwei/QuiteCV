@@ -9,7 +9,8 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { parseResumeMarkdown } from "@/lib/parse-resume";
-import { DEFAULT_RESUME_MARKDOWN, getDefaultResumeMarkdown } from "@/data/default-resume";
+import { detectLocale, getUIMessages, PHOTO_UPLOADED_PLACEHOLDERS, type Locale, type UIMessages } from "@/lib/i18n";
+import { getDefaultResumeMarkdown } from "@/data/default-resume";
 import type { ResumeData, ResumeFontId, ResumeStyleConfig } from "@/types/resume";
 import { DEFAULT_STYLE_CONFIG, RESUME_FONT_OPTIONS, RESUME_TEMPLATE_OPTIONS } from "@/types/resume";
 import { useReactToPrint } from "react-to-print";
@@ -17,7 +18,6 @@ import { useReactToPrint } from "react-to-print";
 const STORAGE_KEY = "resume-markdown-content";
 const STYLE_STORAGE_KEY = "resume-style-config";
 const PHOTO_STORAGE_KEY = "resume-photo-data";
-const PHOTO_PLACEHOLDER = "已上传照片";
 const DEFAULT_TEMPLATE_PHOTO = "/photo.jpg";
 const SUPPORTED_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_PHOTO_FILE_SIZE_BYTES = 5 * 1024 * 1024;
@@ -60,6 +60,7 @@ export default function ResumePage() {
   const [smartOnePage, setSmartOnePage] = useState(false);
   const [photoDataUrl, setPhotoDataUrl] = useState("");
   const [preferredLanguages, setPreferredLanguages] = useState<string[]>([]);
+  const [locale, setLocale] = useState<Locale>("zh");
   const [notice, setNotice] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -73,6 +74,7 @@ export default function ResumePage() {
     const savedStyleConfig = readLocalStorage(STYLE_STORAGE_KEY);
     const savedPhoto = readLocalStorage(PHOTO_STORAGE_KEY);
     const detectedLanguages = readPreferredLanguages();
+    const detectedLocale = detectLocale(detectedLanguages);
     const defaultMarkdown = getDefaultResumeMarkdown(detectedLanguages);
 
     if (savedMarkdown && !shouldUseRecruiterDefault(savedMarkdown) && !isOldPlaceholderTemplate(savedMarkdown)) {
@@ -84,6 +86,8 @@ export default function ResumePage() {
     setStyleConfig(readStyleConfig(savedStyleConfig));
     setPhotoDataUrl(savedPhoto || "");
     setPreferredLanguages(detectedLanguages);
+    setLocale(detectedLocale);
+    document.documentElement.lang = detectedLocale === "en" ? "en" : "zh-CN";
     setIsLoaded(true);
   }, []);
 
@@ -156,30 +160,32 @@ export default function ResumePage() {
     noticeTimerRef.current = setTimeout(() => setNotice(null), 4000);
   }, []);
 
+  const messages = useMemo(() => getUIMessages(locale), [locale]);
+
   const handlePhotoUpload = useCallback(async (file: File) => {
     try {
-      const photoUrl = await createPhotoDataUrl(file);
+      const photoUrl = await createPhotoDataUrl(file, messages);
 
       setPhotoDataUrl(photoUrl);
       const savedPhoto = writeLocalStorage(PHOTO_STORAGE_KEY, photoUrl);
       if (!savedPhoto) {
-        showNotice("照片已用于预览，但浏览器本地空间不足，刷新后可能丢失。");
+        showNotice(messages.photoStorageWarning);
       }
       setMarkdown((current) =>
         upsertMarkdownFrontmatterField(
           current || getDefaultResumeMarkdown(preferredLanguages),
           "photo",
-          PHOTO_PLACEHOLDER
+          messages.photoUploadedPlaceholder
         )
       );
     } catch (error) {
-      showNotice(error instanceof Error ? error.message : "照片上传失败。");
+      showNotice(error instanceof Error ? error.message : messages.photoUploadFailed);
     }
-  }, [preferredLanguages, showNotice]);
+  }, [messages, preferredLanguages, showNotice]);
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
-    documentTitle: resumeData?.metadata.name || "简历",
+    documentTitle: resumeData?.metadata.name || messages.resumeDocTitle,
     pageStyle: `
       @page {
         size: A4;
@@ -215,7 +221,8 @@ export default function ResumePage() {
   if (!isLoaded) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-neutral-50">
-        <div className="text-neutral-400 text-sm">加载中...</div>
+        {/* Locale is not detected yet at this point, so keep the splash wordless. */}
+        <div className="text-neutral-400 text-sm animate-pulse">···</div>
       </div>
     );
   }
@@ -235,6 +242,7 @@ export default function ResumePage() {
             {memoizedResumeData && (
                 <ResumePreview
                   data={memoizedResumeData}
+                  locale={locale}
                   scale={Math.min(scale, 0.62)}
                   onScaleChange={(next) => setScale(Math.min(next, 0.62))}
                   onPrint={handlePrint}
@@ -253,6 +261,7 @@ export default function ResumePage() {
             <MarkdownEditor
               value={markdown}
               onChange={setMarkdown}
+              locale={locale}
               photoDataUrl={memoizedResumeData?.metadata.photo}
               onPhotoUpload={handlePhotoUpload}
             />
@@ -273,6 +282,7 @@ export default function ResumePage() {
                 <MarkdownEditor
                   value={markdown}
                   onChange={setMarkdown}
+                  locale={locale}
                   photoDataUrl={memoizedResumeData?.metadata.photo}
                   onPhotoUpload={handlePhotoUpload}
                 />
@@ -291,6 +301,7 @@ export default function ResumePage() {
                   <ResumePreview
                     ref={printRef}
                     data={memoizedResumeData}
+                    locale={locale}
                     scale={scale}
                     onScaleChange={setScale}
                     onPrint={handlePrint}
@@ -302,7 +313,7 @@ export default function ResumePage() {
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center px-6 text-center text-sm text-neutral-500">
-                    Markdown 解析后会在这里显示预览。
+                    {messages.previewEmptyHint}
                   </div>
                 )}
               </div>
@@ -393,7 +404,9 @@ function readTemplateId(value: unknown) {
 }
 
 function readPreferredLanguages() {
+  const languageOverride = new URLSearchParams(window.location.search).get("lang");
   const languages = [
+    languageOverride,
     ...(Array.isArray(navigator.languages) ? navigator.languages : []),
     navigator.language,
     Intl.DateTimeFormat().resolvedOptions().locale,
@@ -422,20 +435,20 @@ function normalizePreviewPhoto(photo: string | undefined) {
   if (!photo) return undefined;
 
   const value = photo.trim();
-  if (value === PHOTO_PLACEHOLDER) return DEFAULT_TEMPLATE_PHOTO;
+  if (PHOTO_UPLOADED_PLACEHOLDERS.has(value)) return DEFAULT_TEMPLATE_PHOTO;
   if (/^data:image\/(?:png|jpe?g|webp);base64,/i.test(value)) return value;
   if (value.startsWith("/") && !value.startsWith("//")) return value;
 
   return undefined;
 }
 
-function createPhotoDataUrl(file: File) {
+function createPhotoDataUrl(file: File, messages: UIMessages) {
   if (!SUPPORTED_PHOTO_TYPES.has(file.type)) {
-    throw new Error("仅支持 JPG、PNG 或 WebP 图片。");
+    throw new Error(messages.photoUnsupportedType);
   }
 
   if (file.size > MAX_PHOTO_FILE_SIZE_BYTES) {
-    throw new Error("图片不能超过 5MB。");
+    throw new Error(messages.photoTooLarge);
   }
 
   return new Promise<string>((resolve, reject) => {
@@ -448,10 +461,10 @@ function createPhotoDataUrl(file: File) {
       ) {
         resolve(reader.result);
       } else {
-        reject(new Error("无法读取图片。"));
+        reject(new Error(messages.photoReadError));
       }
     };
-    reader.onerror = () => reject(new Error("无法读取图片。"));
+    reader.onerror = () => reject(new Error(messages.photoReadError));
     reader.readAsDataURL(file);
   });
 }

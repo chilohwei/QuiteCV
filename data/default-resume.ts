@@ -1,3 +1,5 @@
+import { detectLocale } from "@/lib/i18n";
+
 export const DEFAULT_RESUME_MARKDOWN_ZH = `---
 name: 你的姓名
 title: AI Agent 产品经理
@@ -173,18 +175,7 @@ Led core workflow optimization, subscription conversion experiments, and user ex
 export const DEFAULT_RESUME_MARKDOWN = DEFAULT_RESUME_MARKDOWN_ZH;
 
 export function getDefaultResumeMarkdown(preferredLanguages: string[] = []) {
-  return prefersEnglish(preferredLanguages)
+  return detectLocale(preferredLanguages) === "en"
     ? DEFAULT_RESUME_MARKDOWN_EN
     : DEFAULT_RESUME_MARKDOWN_ZH;
-}
-
-function prefersEnglish(preferredLanguages: string[]) {
-  const normalized = preferredLanguages.map((language) =>
-    language.trim().replace(/_/g, "-").toLowerCase()
-  );
-  const firstKnownLanguage = normalized.find((language) =>
-    language.startsWith("zh") || language.startsWith("en")
-  );
-
-  return firstKnownLanguage?.startsWith("en") || false;
 }

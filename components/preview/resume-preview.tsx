@@ -9,6 +9,7 @@ import {
   getResumeFontOptionsForAudience,
 } from "@/types/resume";
 import { DefaultTemplate } from "@/components/templates/default-template";
+import { getUIMessages, type Locale, type UIMessages } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -25,6 +26,7 @@ import {
 
 interface ResumePreviewProps {
   data: ResumeData;
+  locale?: Locale;
   scale: number;
   onScaleChange: (scale: number) => void;
   onPrint: () => void;
@@ -35,7 +37,7 @@ interface ResumePreviewProps {
   onSmartOnePageChange: (enabled: boolean) => void;
 }
 
-type ActivePreviewControl = "scale" | "format" | "smart" | null;
+type ActivePreviewControl = "scale" | "format" | null;
 
 const toolbarButtonClass = (active = false) =>
   [
@@ -56,6 +58,7 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
   function ResumePreview(
     {
       data,
+      locale = "zh",
       scale,
       onScaleChange,
       onPrint,
@@ -69,7 +72,6 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
   ) {
     const viewportRef = useRef<HTMLDivElement>(null);
     const printTargetRef = useRef<HTMLDivElement | null>(null);
-    const previewControlsRef = useRef<HTMLDivElement | null>(null);
     const [fitScale, setFitScale] = useState(scale);
     const [pageMetrics, setPageMetrics] = useState<{
       width: number;
@@ -82,7 +84,7 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
     const [activeControl, setActiveControl] = useState<ActivePreviewControl>(null);
     const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const onePageFittedRef = useRef(true);
-    const smartBaselineStyleRef = useRef<ResumeStyleConfig | null>(null);
+    const messages = getUIMessages(locale);
 
     useEffect(() => {
       return () => {
@@ -90,17 +92,22 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
       };
     }, []);
 
+    // Both the mobile and desktop layouts mount their own ResumePreview
+    // instance and share smartOnePage/activeControl via props from the
+    // parent. A click landing in EITHER instance's toolbar must count as
+    // "inside" for both listeners, so this checks a shared class marker
+    // instead of a per-instance ref — otherwise the hidden sibling
+    // instance sees every click on the visible toolbar as "outside" and
+    // closes the mode out from under the click that opened it.
     useEffect(() => {
-      if (!formatPanelOpen && !activeControl) return;
+      if (!formatPanelOpen && !activeControl && !smartOnePage) return;
 
       const handlePointerDown = (event: PointerEvent) => {
         const target = event.target;
         if (!(target instanceof Node)) return;
 
-        if (previewControlsRef.current?.contains(target)) return;
-        if (activeControl === "smart" && smartBaselineStyleRef.current) {
-          onStyleConfigChange(smartBaselineStyleRef.current);
-          smartBaselineStyleRef.current = null;
+        if (target instanceof Element && target.closest(".resume-preview-toolbar")) return;
+        if (smartOnePage) {
           onSmartOnePageChange(false);
         }
         setActiveControl(null);
@@ -109,7 +116,7 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
 
       document.addEventListener("pointerdown", handlePointerDown);
       return () => document.removeEventListener("pointerdown", handlePointerDown);
-    }, [activeControl, formatPanelOpen, onSmartOnePageChange, onStyleConfigChange]);
+    }, [activeControl, formatPanelOpen, onSmartOnePageChange, smartOnePage]);
 
     useEffect(() => {
       if (smartOnePage) {
@@ -118,15 +125,11 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
       }
     }, [smartOnePage]);
 
-    const handleSmartOnePageResult = useCallback((result: {
-      fittedOnePage: boolean;
-      styleConfig: ResumeStyleConfig;
-    }) => {
-      onStyleConfigChange(result.styleConfig);
-      onSmartOnePageChange(false);
-
+    // Smart one page is a pure view mode: it never touches the persisted
+    // styleConfig, so turning it off always returns to the default layout.
+    const handleSmartOnePageResult = useCallback((result: { fittedOnePage: boolean }) => {
       if (!result.fittedOnePage && onePageFittedRef.current) {
-        setOnePageToast("已收紧到最小排版；内容仍超过一页，可继续精简内容");
+        setOnePageToast(messages.onePageOverflowToast);
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
         toastTimerRef.current = setTimeout(() => setOnePageToast(null), 4000);
       } else if (result.fittedOnePage) {
@@ -134,34 +137,31 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
       }
 
       onePageFittedRef.current = result.fittedOnePage;
-    }, [onSmartOnePageChange, onStyleConfigChange]);
+    }, [messages]);
 
     const handleSmartOnePageRequest = useCallback(() => {
-      if (activeControl === "smart") {
-        if (smartBaselineStyleRef.current) {
-          onStyleConfigChange(smartBaselineStyleRef.current);
-          smartBaselineStyleRef.current = null;
-        }
-        setActiveControl(null);
+      setActiveControl(null);
+      setFormatPanelOpen(false);
+
+      if (smartOnePage) {
+        setOnePageToast(null);
         onSmartOnePageChange(false);
         return;
       }
 
-      smartBaselineStyleRef.current = styleConfig;
-      setActiveControl("smart");
-      setFormatPanelOpen(false);
       onePageFittedRef.current = true;
       setOnePageToast(null);
       onSmartOnePageChange(true);
-    }, [activeControl, onSmartOnePageChange, onStyleConfigChange, styleConfig]);
+    }, [onSmartOnePageChange, smartOnePage]);
 
     const handleFormatPanelToggle = useCallback(() => {
+      onSmartOnePageChange(false);
       setFormatPanelOpen((open) => {
         const nextOpen = !open;
         setActiveControl(nextOpen ? "format" : null);
         return nextOpen;
       });
-    }, []);
+    }, [onSmartOnePageChange]);
 
     const handleScaleIndicatorToggle = useCallback(() => {
       setFormatPanelOpen(false);
@@ -279,8 +279,7 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
         {/* Right-side vertical toolbar (quiet, edge-docked) */}
         <div className="no-print pointer-events-none absolute inset-0 z-20">
           <div
-            ref={previewControlsRef}
-            className="pointer-events-auto absolute right-3 top-1/2 -translate-y-1/2 md:right-4"
+            className="resume-preview-toolbar pointer-events-auto absolute right-3 top-1/2 -translate-y-1/2 md:right-4"
           >
             <div className="flex flex-col items-stretch gap-0.5 rounded-xl border border-neutral-200/80 bg-white/86 p-0.5 shadow-[0_1px_0_rgba(0,0,0,0.04)]">
               <div className="flex flex-col items-stretch gap-0.5 px-0.5 py-0.5">
@@ -292,13 +291,13 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
                       className={toolbarButtonClass()}
                       onClick={() => onScaleChange(Math.max(0.5, Number((scale - 0.1).toFixed(2))))}
                       disabled={scale <= 0.5}
-                      aria-label="缩小"
+                      aria-label={messages.zoomOut}
                     >
                       <ZoomOut className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left" sideOffset={10}>
-                    缩小
+                    {messages.zoomOut}
                   </TooltipContent>
                 </Tooltip>
 
@@ -306,7 +305,7 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
                   type="button"
                   className={toolbarTextButtonClass(activeControl === "scale")}
                   onClick={handleScaleIndicatorToggle}
-                  aria-label="缩放比例"
+                  aria-label={messages.zoomLevel}
                   aria-pressed={activeControl === "scale"}
                 >
                   {Math.round(scale * 100)}%
@@ -320,13 +319,13 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
                       className={toolbarButtonClass()}
                       onClick={() => onScaleChange(Math.min(1.2, Number((scale + 0.1).toFixed(2))))}
                       disabled={scale >= 1.2}
-                      aria-label="放大"
+                      aria-label={messages.zoomIn}
                     >
                       <ZoomIn className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left" sideOffset={10}>
-                    放大
+                    {messages.zoomIn}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -342,7 +341,7 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
                     size="icon-sm"
                     className={toolbarButtonClass(activeControl === "format")}
                     onClick={handleFormatPanelToggle}
-                    aria-label="编辑外观"
+                    aria-label={messages.editAppearance}
                     aria-expanded={formatPanelOpen}
                     aria-pressed={activeControl === "format"}
                   >
@@ -350,7 +349,7 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="left" sideOffset={10}>
-                  编辑外观
+                  {messages.editAppearance}
                 </TooltipContent>
               </Tooltip>
 
@@ -359,16 +358,16 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    className={toolbarButtonClass(activeControl === "smart" || smartOnePage)}
+                    className={toolbarButtonClass(smartOnePage)}
                     onClick={handleSmartOnePageRequest}
-                    aria-label="智能一页"
-                    aria-pressed={activeControl === "smart" || smartOnePage}
+                    aria-label={messages.smartOnePage}
+                    aria-pressed={smartOnePage}
                   >
                     <WandSparkles className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="left" sideOffset={10}>
-                  智能一页
+                  {messages.smartOnePage}
                 </TooltipContent>
               </Tooltip>
 
@@ -379,13 +378,13 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
                     size="icon-sm"
                     className={toolbarButtonClass()}
                     onClick={onPrint}
-                    aria-label="打印"
+                    aria-label={messages.print}
                   >
                     <Printer className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="left" sideOffset={10}>
-                  打印
+                  {messages.print}
                 </TooltipContent>
               </Tooltip>
 
@@ -396,13 +395,13 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
                     size="icon-sm"
                     className={toolbarButtonClass()}
                     onClick={onExportPdf}
-                    aria-label="导出 PDF"
+                    aria-label={messages.exportPdf}
                   >
                     <FileDown className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="left" sideOffset={10}>
-                  导出 PDF
+                  {messages.exportPdf}
                 </TooltipContent>
               </Tooltip>
 
@@ -411,6 +410,7 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
             {formatPanelOpen && (
               <FormatPanel
                 resumeLanguage={data.metadata.language}
+                messages={messages}
                 styleConfig={styleConfig}
                 onStyleConfigChange={onStyleConfigChange}
               />
@@ -426,10 +426,10 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
                   size="sm"
                   className="h-7 gap-1 rounded-full px-2 text-xs text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950"
                   onClick={() => goToPage(pageState.current - 1)}
-                  aria-label="上一页"
+                  aria-label={messages.prevPage}
                 >
                   <ChevronLeft className="h-3.5 w-3.5" />
-                  上一页
+                  {messages.prevPage}
                 </Button>
               )}
 
@@ -443,9 +443,9 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
                   size="sm"
                   className="h-7 gap-1 rounded-full px-2 text-xs text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950"
                   onClick={() => goToPage(pageState.current + 1)}
-                  aria-label="下一页"
+                  aria-label={messages.nextPage}
                 >
-                  下一页
+                  {messages.nextPage}
                   <ChevronRight className="h-3.5 w-3.5" />
                 </Button>
               )}
@@ -498,10 +498,12 @@ export const ResumePreview = forwardRef<HTMLDivElement, ResumePreviewProps>(
 
 function FormatPanel({
   resumeLanguage,
+  messages,
   styleConfig,
   onStyleConfigChange,
 }: {
   resumeLanguage?: string;
+  messages: UIMessages;
   styleConfig: ResumeStyleConfig;
   onStyleConfigChange: (config: ResumeStyleConfig) => void;
 }) {
@@ -517,12 +519,12 @@ function FormatPanel({
   return (
     <div className="absolute right-12 top-0 w-[min(18rem,calc(100vw-4rem))] rounded-xl border border-neutral-200/80 bg-white/95 p-3.5 text-neutral-900 shadow-[0_18px_48px_rgba(16,16,16,0.16)] backdrop-blur">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-sm font-semibold">排版设置</div>
+        <div className="text-sm font-semibold">{messages.formatSettings}</div>
         <button
           type="button"
           onClick={() => onStyleConfigChange(DEFAULT_STYLE_CONFIG)}
           className="grid size-7 place-items-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-          aria-label="恢复默认样式"
+          aria-label={messages.resetStyles}
         >
           <RotateCcw className="size-3.5" />
         </button>
@@ -530,7 +532,7 @@ function FormatPanel({
 
       <div className="grid gap-4">
         <div className="grid gap-2">
-          <span className="text-xs font-medium text-neutral-600">字体</span>
+          <span className="text-xs font-medium text-neutral-600">{messages.font}</span>
           <div className="grid grid-cols-2 gap-2">
             {fontOptions.map((font) => (
               <button
@@ -554,7 +556,7 @@ function FormatPanel({
         </div>
 
         <RangeControl
-          label="字号"
+          label={messages.fontSize}
           value={styleConfig.fontSize}
           min={7.2}
           max={12.4}
@@ -563,7 +565,7 @@ function FormatPanel({
           onChange={(fontSize) => update({ fontSize })}
         />
         <RangeControl
-          label="行距"
+          label={messages.lineHeight}
           value={styleConfig.lineHeight}
           min={1.08}
           max={1.84}
@@ -572,7 +574,7 @@ function FormatPanel({
           onChange={(lineHeight) => update({ lineHeight })}
         />
         <RangeControl
-          label="页边距"
+          label={messages.pagePadding}
           value={styleConfig.pagePadding}
           min={6}
           max={26}
@@ -581,7 +583,7 @@ function FormatPanel({
           onChange={(pagePadding) => update({ pagePadding })}
         />
         <RangeControl
-          label="段落间距"
+          label={messages.sectionSpacing}
           value={styleConfig.sectionSpacing}
           min={0.35}
           max={1.28}

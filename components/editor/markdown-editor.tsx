@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { ImagePlus } from "lucide-react";
 import { useMemo, useRef } from "react";
+import { getUIMessages, type Locale } from "@/lib/i18n";
 
 const MonacoEditor = dynamic(
   () =>
@@ -16,8 +17,9 @@ const MonacoEditor = dynamic(
   {
     ssr: false,
     loading: () => (
+      // Rendered before the UI locale is known, so keep it wordless.
       <div className="w-full h-full flex items-center justify-center bg-[#111316]">
-        <div className="text-neutral-500 text-sm">加载编辑器...</div>
+        <div className="text-neutral-500 text-sm animate-pulse">···</div>
       </div>
     ),
   }
@@ -30,6 +32,7 @@ interface MarkdownEditorProps {
   value: string;
   onChange: (value: string) => void;
   theme?: "light" | "dark";
+  locale?: Locale;
   photoDataUrl?: string;
   onPhotoUpload?: (file: File) => void | Promise<void>;
 }
@@ -38,10 +41,12 @@ export function MarkdownEditor({
   value,
   onChange,
   theme = "dark",
+  locale = "zh",
   photoDataUrl,
   onPhotoUpload,
 }: MarkdownEditorProps) {
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const messages = getUIMessages(locale);
   const editorOptions = useMemo(
     () => ({
       minimap: { enabled: false },
@@ -109,8 +114,8 @@ export function MarkdownEditor({
             type="button"
             onClick={() => photoInputRef.current?.click()}
             className="absolute right-4 top-3 z-10 grid size-8 cursor-pointer place-items-center rounded-lg border border-neutral-700/80 bg-[#171a20]/92 text-neutral-300 shadow-[0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-[#20242d] hover:text-white active:bg-[#2a303c]"
-            aria-label={photoDataUrl ? "更换照片" : "上传照片"}
-            title={photoDataUrl ? "更换照片" : "上传照片"}
+            aria-label={photoDataUrl ? messages.changePhoto : messages.uploadPhoto}
+            title={photoDataUrl ? messages.changePhoto : messages.uploadPhoto}
           >
             <ImagePlus className="size-4" />
           </button>

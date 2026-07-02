@@ -9,10 +9,7 @@ interface DefaultTemplateProps {
   data: ResumeData;
   styleConfig: ResumeStyleConfig;
   smartOnePage?: boolean;
-  onSmartOnePageResult?: (result: {
-    fittedOnePage: boolean;
-    styleConfig: ResumeStyleConfig;
-  }) => void;
+  onSmartOnePageResult?: (result: { fittedOnePage: boolean }) => void;
 }
 
 const MM_TO_PX = 3.7795;
@@ -68,12 +65,14 @@ const PAGE_PROFILE: PageProfile = {
   bodyLine: 1.68,
 };
 
-const SMART_COMPRESSION_STEPS: Array<{
+type SmartCompressionStep = {
   font: number;
   line: number;
   pad: number;
   spacing: number;
-}> = [
+};
+
+const SMART_COMPRESSION_KEYFRAMES: SmartCompressionStep[] = [
   { font: 1, line: 1, pad: 1, spacing: 1 },
   { font: 1, line: 0.98, pad: 1, spacing: 0.95 },
   { font: 0.98, line: 0.96, pad: 0.92, spacing: 0.86 },
@@ -83,6 +82,27 @@ const SMART_COMPRESSION_STEPS: Array<{
   { font: 0.84, line: 0.82, pad: 0.6, spacing: 0.45 },
   { font: 0.8, line: 0.78, pad: 0.52, spacing: 0.38 },
 ];
+
+// Interpolate between keyframes so the first candidate that fits one page
+// sits close to a full page instead of over-compressing and leaving a large
+// blank area at the bottom.
+const SMART_STEP_SUBDIVISIONS = 3;
+
+const SMART_COMPRESSION_STEPS: SmartCompressionStep[] =
+  SMART_COMPRESSION_KEYFRAMES.flatMap((step, index, keyframes) => {
+    const next = keyframes[index + 1];
+    if (!next) return [step];
+
+    return Array.from({ length: SMART_STEP_SUBDIVISIONS }, (_, subIndex) => {
+      const t = subIndex / SMART_STEP_SUBDIVISIONS;
+      return {
+        font: step.font + (next.font - step.font) * t,
+        line: step.line + (next.line - step.line) * t,
+        pad: step.pad + (next.pad - step.pad) * t,
+        spacing: step.spacing + (next.spacing - step.spacing) * t,
+      };
+    });
+  });
 
 type ResumeLayout = {
   profileIndex: number;
@@ -423,7 +443,12 @@ export function DefaultTemplate({
     (section) => !knownSections.includes(section) && section.content.trim()
   );
   const primaryRole = workSection?.items?.[0];
-  const roleTitle = metadata.tags?.find((tag) => tag.includes("产品")) || metadata.title || primaryRole?.subtitle || "AI Agent 产品经理";
+  const isZhResume = getResumeFontAudience(metadata.language) === "chinese";
+  const roleTitle =
+    metadata.tags?.find((tag) => tag.includes("产品")) ||
+    metadata.title ||
+    primaryRole?.subtitle ||
+    (isZhResume ? "AI Agent 产品经理" : "AI Product Manager");
   const availability = metadata.tags?.find((tag) => tag.includes("离职") || tag.includes("到岗"));
   const identityLine = [availability, roleTitle].filter(Boolean).join("  |  ");
   const page = pageProfiles[layout.profileIndex] || pageProfiles[0];
@@ -438,12 +463,14 @@ export function DefaultTemplate({
         educationSection,
         extraSections,
         primaryRole,
+        isZhResume,
       }),
     [
       educationSection,
       extraSections,
       highlightsSection,
       introSection,
+      isZhResume,
       primaryRole,
       projectSection,
       skillsSection,
@@ -496,7 +523,6 @@ export function DefaultTemplate({
     if (smartOnePage) {
       onePageResultRef.current?.({
         fittedOnePage: fitsOnePage(selectedLayout),
-        styleConfig: pageCandidates[selectedLayout.profileIndex]?.styleConfig || styleConfig,
       });
     }
   }, [blockById, blocks, pageCandidates, pageProfiles, smartOnePage, styleConfig]);
@@ -574,6 +600,7 @@ function buildResumeBlocks({
   educationSection,
   extraSections,
   primaryRole,
+  isZhResume,
 }: {
   introSection?: ResumeSection;
   highlightsSection?: ResumeSection;
@@ -583,14 +610,17 @@ function buildResumeBlocks({
   educationSection?: ResumeSection;
   extraSections: ResumeSection[];
   primaryRole?: ResumeSectionItem;
+  isZhResume: boolean;
 }) {
   const blocks: ResumeBlock[] = [{ id: "resume-header", kind: "header" }];
 
   blocks.push({
     id: "section-intro",
     kind: "paragraph",
-    title: "个人简介",
-    text: introSection ? sectionToPlainText(introSection) : buildRecruiterSummary(primaryRole),
+    title: isZhResume ? "个人简介" : "Summary",
+    text: introSection
+      ? sectionToPlainText(introSection)
+      : buildRecruiterSummary(primaryRole, isZhResume),
     intro: true,
   });
 
@@ -1215,12 +1245,16 @@ function sectionToPlainText(section: ResumeSection) {
     .join(" ");
 }
 
-function buildRecruiterSummary(item?: ResumeSectionItem) {
+function buildRecruiterSummary(item: ResumeSectionItem | undefined, isZhResume: boolean) {
   if (item?.description) {
-    return "7 年互联网产品经验，近 3 年专注 AI Agent、RAG 与 AI Workflow 系统设计，具备 AI SaaS 产品与 B 端 AI 场景的完整落地经验。熟悉 Prompt Engineering、Context Engineering、Tool Calling、Memory 管理、多 Agent 协作与 Agent Evaluation，能够独立推进 AI 系统从需求分析、工作流设计到验证优化的完整闭环。";
+    return isZhResume
+      ? "7 年互联网产品经验，近 3 年专注 AI Agent、RAG 与 AI Workflow 系统设计，具备 AI SaaS 产品与 B 端 AI 场景的完整落地经验。熟悉 Prompt Engineering、Context Engineering、Tool Calling、Memory 管理、多 Agent 协作与 Agent Evaluation，能够独立推进 AI 系统从需求分析、工作流设计到验证优化的完整闭环。"
+      : "7 years of product experience, with the last 3 focused on AI Agent, RAG, and AI workflow system design, covering end-to-end delivery for AI SaaS and enterprise AI scenarios. Familiar with prompt engineering, context engineering, tool calling, memory management, multi-agent collaboration, and agent evaluation, able to drive AI systems from discovery and workflow design through validation and optimization.";
   }
 
-  return "面向 AI 时代的产品经理，关注 AI Agent、RAG、工作流编排与结构化知识系统，擅长将复杂技术能力转化为清晰、可信、可验证的产品体验。";
+  return isZhResume
+    ? "面向 AI 时代的产品经理，关注 AI Agent、RAG、工作流编排与结构化知识系统，擅长将复杂技术能力转化为清晰、可信、可验证的产品体验。"
+    : "Product manager for the AI era, focused on AI agents, RAG, workflow orchestration, and structured knowledge systems, skilled at turning complex technical capabilities into clear, trustworthy, verifiable product experiences.";
 }
 
 function joinInline(parts: Array<string | undefined>) {
